@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  commitlint:
+    name: Conventional Commits
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: >
+          npx commitlint
+          --from ${{ github.event.pull_request.base.sha }}
+          --to ${{ github.event.pull_request.head.sha }}
+          --verbose
+
+  shell:
+    name: Shell lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ludeeus/action-shellcheck@master
+        with:
+          severity: error
+      - run: sh -n init.sh && echo "OK  init.sh"
+
+  docker:
+    name: Build e testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: cf-tunnel-init:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Falha sem as variaveis obrigatorias
+        run: |
+          if docker run --rm cf-tunnel-init:ci 2>/dev/null; then
+            echo "deveria ter falhado sem CF_API_TOKEN"; exit 1
+          fi
+          echo "OK  falha sem CF_API_TOKEN"
+
+      - name: Falha sem ingress declarado
+        run: |
+          saida=$(docker run --rm \
+            -e CF_API_TOKEN=x -e CF_ACCOUNT_ID=y -e CF_ZONE_ID=z -e TUNNEL_NAME=t \
+            cf-tunnel-init:ci 2>&1 || true)
+          echo "$saida" | grep -q "defina CF_INGRESS" || {
+            echo "esperava erro de ingress, veio: $saida"; exit 1; }
+          echo "OK  exige CF_INGRESS ou CF_HOSTNAME/CF_SERVICE"
+
+      - name: Ingress renderizado e valido para o cloudflared
+        run: |
+          mkdir -p /tmp/cf
+          # CF_API_TOKEN invalido de proposito: so queremos a etapa de render, que
+          # acontece antes da primeira chamada de API. O container falha depois.
+          docker run --rm -v /tmp/cf:/etc/cloudflared \
+            -e CF_API_TOKEN=invalido -e CF_ACCOUNT_ID=a -e CF_ZONE_ID=z -e TUNNEL_NAME=ci \
+            -e CF_INGRESS='[{"hostname":"a.exemplo.com","path":"^/auth(/.*)?$","service":"http://kc:8080"},{"hostname":"a.exemplo.com","service":"http://web:8080"},{"hostname":"b.exemplo.com","service":"tcp://gw:9443"}]' \
+            cf-tunnel-init:ci || true
+
+          test -f /tmp/cf/ingress.json || { echo "ingress.json nao foi gerado"; exit 1; }
+          echo "--- ingress.json ---"; cat /tmp/cf/ingress.json
+
+          # Catch-all acrescentado automaticamente
+          jq -e 'map(select(.service == "http_status:404")) | length == 1' /tmp/cf/ingress.json \
+            >/dev/null || { echo "catch-all ausente ou duplicado"; exit 1; }
+          echo "OK  catch-all presente uma vez"
+
+          # Monta um config.yml completo e valida com o proprio cloudflared
+          {
+            echo "tunnel: 00000000-1111-2222-3333-444444444444"
+            echo "credentials-file: /dev/null"
+            echo "ingress:"
+            jq -r '.[] | "  - " + ([to_entries[] | "\(.key): \(.value|tojson)"] | join("\n    "))' \
+              /tmp/cf/ingress.json
+          } > /tmp/cf/validar.yml
+          echo "--- config.yml ---"; cat /tmp/cf/validar.yml
+
+          docker run --rm -v /tmp/cf/validar.yml:/cfg.yml:ro \
+            cloudflare/cloudflared:latest --config /cfg.yml tunnel ingress validate
+
+          echo "--- roteamento ---"
+          docker run --rm -v /tmp/cf/validar.yml:/cfg.yml:ro cloudflare/cloudflared:latest \
+            --config /cfg.yml tunnel ingress rule https://a.exemplo.com/auth/realms/x \
+            | grep -q "http://kc:8080" || { echo "/auth deveria ir para o keycloak"; exit 1; }
+          echo "OK  /auth -> keycloak"
+
+          # A ancoragem do regex: /authorize NAO pode cair no keycloak
+          docker run --rm -v /tmp/cf/validar.yml:/cfg.yml:ro cloudflare/cloudflared:latest \
+            --config /cfg.yml tunnel ingress rule https://a.exemplo.com/authorize \
+            | grep -q "http://web:8080" || { echo "/authorize deveria ir para o web"; exit 1; }
+          echo "OK  /authorize -> web (regex ancorado)"
