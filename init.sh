@@ -101,6 +101,10 @@ else
     echo "    ! nao foi possivel dar posse do creds.json ao uid ${CF_CREDS_UID:-65532}; usando 0644"
 fi
 
+# Nao basta ter escrito o arquivo: o proximo container precisa conseguir le-lo.
+# Falhar aqui em vez de sair 0 e deixar o cloudflared descobrir sozinho.
+/usr/local/bin/verificar-creds.sh "$CRED" "${CF_CREDS_UID:-65532}" "${CF_CREDS_GID:-65532}"
+
 echo "==> montando o config.yml..."
 {
   echo "tunnel: $TID"

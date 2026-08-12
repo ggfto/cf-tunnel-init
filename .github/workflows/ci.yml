@@ -41,7 +41,8 @@ jobs:
       - uses: ludeeus/action-shellcheck@master
         with:
           severity: error
-      - run: sh -n init.sh && echo "OK  init.sh"
+      - run: |
+          for f in init.sh verificar-creds.sh; do sh -n "$f" && echo "OK  $f"; done
 
   docker:
     name: Build e testes
@@ -75,6 +76,32 @@ jobs:
           echo "$saida" | grep -q "defina CF_INGRESS" || {
             echo "esperava erro de ingress, veio: $saida"; exit 1; }
           echo "OK  exige CF_INGRESS ou CF_HOSTNAME/CF_SERVICE"
+
+      - name: Verificacao de leitura do creds.json
+        run: |
+          # Regressao: o init ja saiu 0 entregando um creds.json 0600 root:root,
+          # que poe o cloudflared (nonroot, uid 65532) em crash loop.
+          docker run --rm --entrypoint sh cf-tunnel-init:ci -c '
+            set -e
+            echo "{}" > /tmp/a.json; chmod 600 /tmp/a.json
+            if verificar-creds.sh /tmp/a.json 65532 2>/dev/null; then
+              echo "FALHOU: 0600 root:root deveria ser reprovado"; exit 1
+            fi
+            echo "OK  reprova 0600 root:root"
+
+            echo "{}" > /tmp/b.json; chown 65532:65532 /tmp/b.json; chmod 600 /tmp/b.json
+            verificar-creds.sh /tmp/b.json 65532 >/dev/null
+            echo "OK  aprova 0600 com posse do uid alvo"
+
+            echo "{}" > /tmp/c.json; chmod 644 /tmp/c.json
+            verificar-creds.sh /tmp/c.json 65532 >/dev/null
+            echo "OK  aprova 0644"
+
+            if verificar-creds.sh /tmp/ausente.json 65532 2>/dev/null; then
+              echo "FALHOU: arquivo ausente deveria ser reprovado"; exit 1
+            fi
+            echo "OK  reprova arquivo ausente"
+          '
 
       - name: Ingress renderizado e valido para o cloudflared
         run: |

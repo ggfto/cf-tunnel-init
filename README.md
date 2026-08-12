@@ -84,6 +84,7 @@ o certificado.
 4. Faz upsert de um CNAME proxied por hostname
 5. **Falha** se algum CNAME não subir — um tunnel cujo DNS nunca resolveu é
    indistinguível de um tunnel fora do ar, e você depuraria a metade errada
+6. **Falha** se o `creds.json` não for legível pelo uid do cloudflared
 
 ## Origem
 
@@ -100,3 +101,8 @@ que um tunnel em crash loop com `permission denied`.
 
 Ajuste com `CF_CREDS_UID` / `CF_CREDS_GID` se rodar o cloudflared como outro
 usuário.
+
+O init **falha** se o uid alvo não conseguir ler o `creds.json` — a leitura é
+testada de fato, como aquele uid, não deduzida de dono e modo. Sem isso o init
+sairia com sucesso e o erro só apareceria no container seguinte, em crash loop,
+aparecendo de fora como um 530 genérico da Cloudflare.
