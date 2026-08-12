@@ -88,7 +88,18 @@ echo "==> tunnel id: $TID"
 echo "==> buscando o token e escrevendo o creds.json..."
 TOKEN=$(cf GET "$ACCT/cfd_tunnel/$TID/token" | jq -r '.result')
 echo "$TOKEN" | base64 -d | jq '{AccountTag: .a, TunnelID: .t, TunnelSecret: .s}' > "$CRED"
-chmod 600 "$CRED"
+
+# O arquivo precisa ser legivel pelo cloudflared, que na imagem oficial roda como
+# nonroot (uid 65532) — e este init roda como root. Um `chmod 600` sozinho deixaria
+# o runner em crash loop com "permission denied", entao damos a posse a ele.
+# Se o chown nao for possivel (init sem privilegio), cai para 0644 e avisa, porque
+# um segredo legivel e melhor que um tunnel que nunca sobe.
+if chown "${CF_CREDS_UID:-65532}:${CF_CREDS_GID:-65532}" "$CRED" 2>/dev/null; then
+    chmod 600 "$CRED"
+else
+    chmod 644 "$CRED"
+    echo "    ! nao foi possivel dar posse do creds.json ao uid ${CF_CREDS_UID:-65532}; usando 0644"
+fi
 
 echo "==> montando o config.yml..."
 {

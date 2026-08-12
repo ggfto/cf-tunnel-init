@@ -90,3 +90,13 @@ o certificado.
 Generalizado a partir do `cloudflared-init` do
 [HiveKeeper](https://github.com/ggfto/HiveKeeper), onde o ingress era fixo no script.
 Aqui ele vem do ambiente, o que torna a imagem reutilizável entre stacks.
+
+## Permissões do `creds.json`
+
+O init roda como root e o `cloudflared` oficial roda como `nonroot` (uid 65532).
+Por isso o `creds.json` é gravado com posse desse uid e modo `0600`. Se o chown
+não for possível, cai para `0644` e avisa no log — um segredo legível é melhor
+que um tunnel em crash loop com `permission denied`.
+
+Ajuste com `CF_CREDS_UID` / `CF_CREDS_GID` se rodar o cloudflared como outro
+usuário.
