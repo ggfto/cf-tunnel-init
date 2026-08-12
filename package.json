@@ -1,6 +1,6 @@
 {
   "name": "cf-tunnel-init",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "Init container que provisiona um Cloudflare Tunnel locally-managed pela API",
   "repository": {

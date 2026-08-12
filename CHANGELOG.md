@@ -1,3 +1,9 @@
+## [1.0.2](https://github.com/ggfto/cf-tunnel-init/compare/v1.0.1...v1.0.2) (2026-08-12)
+
+### Bug Fixes
+
+* falha se o creds.json nao for legivel pelo cloudflared ([2351ede](https://github.com/ggfto/cf-tunnel-init/commit/2351edefc46ba4b64ce28a8ab116434e314af5e1))
+
 ## [1.0.1](https://github.com/ggfto/cf-tunnel-init/compare/v1.0.0...v1.0.1) (2026-08-12)
 
 ### Bug Fixes
